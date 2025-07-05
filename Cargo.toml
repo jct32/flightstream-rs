@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-xplane-sdk-sys = "0.4.0"
+xplane-sdk-sys = { version = "*", features = ["generate-bindings"] }
 xplm = "0.4.2"
 
 [lib]
