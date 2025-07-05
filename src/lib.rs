@@ -12,7 +12,7 @@ impl Plugin for FlightStreamPlugin {
     type Error = std::convert::Infallible;
 
     fn start() -> Result<Self, Self::Error> {
-        let plugin_submenu = Menu::new("Flightstream-rs").unwrap();
+        let plugin_submenu = Menu::new("flightstream-rs").unwrap();
         plugin_submenu.add_child(ActionItem::new("Download and Load Flight Plan", DownloadAndLoadHandler).unwrap());
         plugin_submenu.add_child(ActionItem::new("Set username", SetUserNameHandler).unwrap());
         plugin_submenu.add_to_plugins_menu();
@@ -23,7 +23,7 @@ impl Plugin for FlightStreamPlugin {
 
     fn info(&self) -> PluginInfo {
         PluginInfo { 
-            name: String::from("Flightstream-rs"), 
+            name: String::from("flightstream-rs"), 
             signature: String::from("jct32.flighstream"), 
             description: String::from("A plugin for downloading a Simbrief flight plan to the X1000") }
     }
