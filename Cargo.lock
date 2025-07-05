@@ -73,6 +73,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 name = "flightstream-rs"
 version = "0.1.0"
 dependencies = [
+ "xplane-sdk-sys",
  "xplm",
 ]
 
@@ -304,6 +305,12 @@ name = "windows_x86_64_msvc"
 version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
+
+[[package]]
+name = "xplane-sdk-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de7c68c002715d386c6e26c6f99e739aa97fe9e45fa35dc21ee25d8760db71e8"
 
 [[package]]
 name = "xplm"
