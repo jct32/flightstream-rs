@@ -9,8 +9,11 @@ use std::ffi::{CString};
 use std::thread::JoinHandle;
 use std::sync::Mutex;
 use std::time::Duration;
+use reqwest;
+use serde_json::{Value};
+
 static HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-static mut DATA: &str = "";
+static DATA: Mutex<Option<String>> = Mutex::new(None);
 
 struct FlightStreamPlugin {
     _plugins_submenu: Menu,
@@ -20,7 +23,7 @@ struct FlightStreamPlugin {
 impl Plugin for FlightStreamPlugin {
     type Error = std::convert::Infallible;
 
-    fn start() -> Result<Self, Self::Error> {
+    fn start() -> std::result::Result<Self, Self::Error> {
         let plugin_submenu = Menu::new("flightstream-rs").unwrap();
         plugin_submenu.add_child(ActionItem::new("Download and Load Flight Plan", DownloadAndLoadHandler).unwrap());
         plugin_submenu.add_child(ActionItem::new("Set username", SetUserNameHandler).unwrap());
@@ -53,29 +56,9 @@ impl MenuClickHandler for DownloadAndLoadHandler {
             println!("Error, cannot spawn another thread, already working");
         }
         else {
-            unsafe {
                 *guard = Some(std::thread::spawn(|| {
-                    DATA = "I
-                    1100 Version
-                    CYCLE 2112
-                    ADEP EDDS
-                    DEPRWY RW25
-                    SID ETAS4B
-                    ADES EDDF
-                    DESRWY RW25L
-                    STAR SPES3B
-                    APP I25L
-                    APPTRANS CHA
-                    NUMENR 6
-                    1 EDDS ADEP 1272.000000 48.689877 9.221964
-                    11 XINLA T163 0.000000 49.283646 9.141608
-                    11 SUKON T163 0.000000 49.659721 9.195556
-                    11 SUPIX T163 0.000000 49.727779 9.305278
-                    11 SPESA T163 0.000000 49.862240 9.348325
-                    1 EDDF ADES 354.000000 50.033306 8.570456";
+                    request_from_simbrief();
                 }));
-            }
-            
         }
         debugln!("Download Selected");
     }
@@ -90,10 +73,38 @@ impl MenuClickHandler for SetUserNameHandler {
 }
 
 
-unsafe fn call_load(data: &str)
+unsafe fn call_load()
 {
-    let plan = CString::new(data).unwrap();
-    unsafe {XPLMLoadFMSFlightPlan(0, plan.as_ptr(), u32::try_from(plan.count_bytes()).unwrap());}
+    let data_lock = DATA.lock().unwrap();
+    if let Some(ref data) = *data_lock {
+        let plan = CString::new(data.as_str()).unwrap();
+        unsafe {XPLMLoadFMSFlightPlan(0, plan.as_ptr(), u32::try_from(plan.count_bytes()).unwrap());}
+    }
+}
+
+fn request_from_simbrief()
+{
+    if let Ok(body) = reqwest::blocking::get("https://www.simbrief.com/api/xml.fetcher.php?username=jct323&json=1").expect("Bad request").text() {
+        let value: &str = body.as_str();
+        let v: Value = serde_json::from_str(value).unwrap();
+        if v["fetch"]["status"] == "Success" {
+            get_flight_plan(v);
+        }
+        else {
+            debugln!("Failed to get request: {}", v["fetch"]["status"]);
+        }
+    };
+}
+
+fn get_flight_plan(v: Value)
+{
+    let fp_link = v["fms_downloads"]["xpe"]["link"].to_string().replace("\"", "");
+    let mut download_link= "https://www.simbrief.com/ofp/flightplans/".to_string();
+    download_link.push_str(&fp_link);
+    if let Ok(body) = reqwest::blocking::get(download_link).expect("Bad FP request").text() {
+        let mut data = DATA.lock().unwrap();
+        *data = Some(body);
+    }
 }
 
 struct LoopHandler;
@@ -105,7 +116,7 @@ impl FlightLoopCallback for LoopHandler {
         {
             if handle.is_finished() {
                 *lock_guard = None;
-                unsafe{call_load(DATA);}
+                unsafe{call_load();}
             }
         }
     }
