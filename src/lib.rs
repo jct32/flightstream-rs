@@ -3,11 +3,18 @@ extern crate xplm;
 use xplm::menu::{ActionItem, Menu, MenuClickHandler};
 use xplm::plugin::{Plugin, PluginInfo};
 use xplm::{debugln, xplane_plugin};
+use xplm::flight_loop::{FlightLoop, LoopState, FlightLoopCallback};
 use xplane_sdk_sys::XPLMLoadFMSFlightPlan;
 use std::ffi::{CString};
+use std::thread::JoinHandle;
+use std::sync::Mutex;
+use std::time::Duration;
+static HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+static mut DATA: &str = "";
 
 struct FlightStreamPlugin {
     _plugins_submenu: Menu,
+    _flight_loop: FlightLoop,
 }
 
 impl Plugin for FlightStreamPlugin {
@@ -18,8 +25,11 @@ impl Plugin for FlightStreamPlugin {
         plugin_submenu.add_child(ActionItem::new("Download and Load Flight Plan", DownloadAndLoadHandler).unwrap());
         plugin_submenu.add_child(ActionItem::new("Set username", SetUserNameHandler).unwrap());
         plugin_submenu.add_to_plugins_menu();
+        let mut flight_loop = FlightLoop::new(LoopHandler);
+        flight_loop.schedule_after(Duration::from_millis(100));
         Ok(FlightStreamPlugin {
-            _plugins_submenu: plugin_submenu
+            _plugins_submenu: plugin_submenu,
+            _flight_loop: flight_loop,
         })
     }
 
@@ -38,25 +48,35 @@ struct DownloadAndLoadHandler;
 
 impl MenuClickHandler for DownloadAndLoadHandler {
     fn item_clicked(&mut self, _item: &ActionItem) {
-        const FLIGHTPLAN: &str = "I
-        1100 Version
-        CYCLE 2112
-        ADEP EDDS
-        DEPRWY RW25
-        SID ETAS4B
-        ADES EDDF
-        DESRWY RW25L
-        STAR SPES3B
-        APP I25L
-        APPTRANS CHA
-        NUMENR 6
-        1 EDDS ADEP 1272.000000 48.689877 9.221964
-        11 XINLA T163 0.000000 49.283646 9.141608
-        11 SUKON T163 0.000000 49.659721 9.195556
-        11 SUPIX T163 0.000000 49.727779 9.305278
-        11 SPESA T163 0.000000 49.862240 9.348325
-        1 EDDF ADES 354.000000 50.033306 8.570456";
-        unsafe{call_load(FLIGHTPLAN)};
+        let mut guard = HANDLE.lock().expect("Lock is panciked");
+        if guard.is_some() {
+            println!("Error, cannot spawn another thread, already working");
+        }
+        else {
+            unsafe {
+                *guard = Some(std::thread::spawn(|| {
+                    DATA = "I
+                    1100 Version
+                    CYCLE 2112
+                    ADEP EDDS
+                    DEPRWY RW25
+                    SID ETAS4B
+                    ADES EDDF
+                    DESRWY RW25L
+                    STAR SPES3B
+                    APP I25L
+                    APPTRANS CHA
+                    NUMENR 6
+                    1 EDDS ADEP 1272.000000 48.689877 9.221964
+                    11 XINLA T163 0.000000 49.283646 9.141608
+                    11 SUKON T163 0.000000 49.659721 9.195556
+                    11 SUPIX T163 0.000000 49.727779 9.305278
+                    11 SPESA T163 0.000000 49.862240 9.348325
+                    1 EDDF ADES 354.000000 50.033306 8.570456";
+                }));
+            }
+            
+        }
         debugln!("Download Selected");
     }
 }
@@ -74,4 +94,19 @@ unsafe fn call_load(data: &str)
 {
     let plan = CString::new(data).unwrap();
     unsafe {XPLMLoadFMSFlightPlan(0, plan.as_ptr(), u32::try_from(plan.count_bytes()).unwrap());}
+}
+
+struct LoopHandler;
+
+impl FlightLoopCallback for LoopHandler {
+    fn flight_loop(&mut self, _state: &mut LoopState) {
+        let mut lock_guard = HANDLE.lock().expect("Lock is panicked");
+        if let Some(ref handle) = *lock_guard
+        {
+            if handle.is_finished() {
+                *lock_guard = None;
+                unsafe{call_load(DATA);}
+            }
+        }
+    }
 }
