@@ -43,13 +43,13 @@ impl Plugin for FlightStreamPlugin {
         set_path(get_plugin_path());
 
         match get_path() {
-            Some(p) => debugln!("{p}"),
+            Some(_p) => (),
             None => debugln!("flightsteam-rs: Bad X-Plane directory path"),
         }
 
         set_username(get_username_from_file());
         match get_username() {
-            Some(u) => debugln!("{u}"),
+            Some(_u) => (),
             None => debugln!("flightstream-rs: Unable to get username from file"),
         }
 
@@ -114,7 +114,7 @@ impl MenuClickHandler for SetUserNameHandler {
     fn item_clicked(&mut self, _item: &ActionItem) {
         set_username(get_username_from_file());
         match get_username() {
-            Some(u) => debugln!("{u}"),
+            Some(_u) => (),
             None => debugln!("flightstream-rs: No username"),
         }
     }
@@ -158,7 +158,6 @@ fn get_flight_plan(v: Value) {
         .to_string()
         .replace("\"", "");
     let mut download_link = "https://www.simbrief.com/ofp/flightplans/".to_string();
-    debugln!("{download_link}");
     download_link.push_str(&fp_link);
     if let Ok(body) = reqwest::blocking::get(download_link)
         .expect("flighstream-rs: Bad FP request link")
