@@ -33,7 +33,7 @@ impl Plugin for FlightStreamPlugin {
 
     fn start() -> std::result::Result<Self, Self::Error> {
         set_custom_panic();
-        let plugin_submenu = Menu::new("flightstream-rs").unwrap();
+        let plugin_submenu = Menu::new("flightstream_rs").unwrap();
         plugin_submenu.add_child(
             ActionItem::new("Download and Load Flight Plan", DownloadAndLoadHandler).unwrap(),
         );
@@ -50,7 +50,7 @@ impl Plugin for FlightStreamPlugin {
         set_username(get_username_from_file());
         match get_username() {
             Some(_u) => (),
-            None => debugln!("flightstream-rs: Unable to get username from file"),
+            None => debugln!("flightstream_rs: Unable to get username from file"),
         }
 
         let mut flight_loop = FlightLoop::new(LoopHandler);
@@ -65,7 +65,7 @@ impl Plugin for FlightStreamPlugin {
 
     fn info(&self) -> PluginInfo {
         PluginInfo {
-            name: String::from("flightstream-rs"),
+            name: String::from("flightstream_rs"),
             signature: String::from("jct32.flightstream"),
             description: String::from(
                 "A plugin for downloading a Simbrief flight plan to the X1000",
@@ -96,10 +96,10 @@ impl MenuClickHandler for DownloadAndLoadHandler {
     fn item_clicked(&mut self, _item: &ActionItem) {
         let mut guard = HANDLE
             .lock()
-            .expect("flightstream-rs: Download lock is panicked");
+            .expect("flightstream_rs: Download lock is panicked");
         if guard.is_some() {
             println!(
-                "flightstream-rs: Error, cannot spawn another download thread, already working"
+                "flightstream_rs: Error, cannot spawn another download thread, already working"
             );
         } else {
             *guard = Some(std::thread::spawn(|| {
@@ -115,7 +115,7 @@ impl MenuClickHandler for SetUserNameHandler {
         set_username(get_username_from_file());
         match get_username() {
             Some(_u) => (),
-            None => debugln!("flightstream-rs: No username"),
+            None => debugln!("flightstream_rs: No username"),
         }
     }
 }
@@ -137,7 +137,7 @@ fn request_from_simbrief() {
             url.push_str(u.as_str());
             url.push_str("&json=1");
             if let Ok(body) = reqwest::blocking::get(url)
-                .expect("flightstream-rs: Unable to get request")
+                .expect("flightstream_rs: Unable to get request")
                 .text()
             {
                 let value: &str = body.as_str();
@@ -145,11 +145,11 @@ fn request_from_simbrief() {
                 if v["fetch"]["status"] == "Success" {
                     get_flight_plan(v);
                 } else {
-                    debugln!("flightstream-rs: Bad request: {}", v["fetch"]["status"]);
+                    debugln!("flightstream_rs: Bad request: {}", v["fetch"]["status"]);
                 }
             };
         }
-        None => debugln!("flightstream-rs: No username"),
+        None => debugln!("flightstream_rs: No username"),
     }
 }
 
@@ -177,7 +177,7 @@ fn get_plugin_path() -> String {
         + &div_char
         + "plugins"
         + &div_char
-        + "flightstream-rs"
+        + "flightstream_rs"
         + &div_char.to_string();
     path
 }
@@ -217,11 +217,11 @@ fn get_username_from_file() -> String {
                     username = contents.trim().to_string();
                 }
                 Err(_) => {
-                    debugln!("flightstream-rs: Unable to open file at {path}");
+                    debugln!("flightstream_rs: Unable to open file at {path}");
                 }
             }
         }
-        None => debugln!("flightstream-rs: File path not found"),
+        None => debugln!("flightstream_rs: File path not found"),
     }
     username
 }
