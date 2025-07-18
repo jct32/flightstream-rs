@@ -1,0 +1,57 @@
+name: build.yml
+
+on:
+  workflow_dispatch:
+    inputs:
+      output-path:
+        description: The package name as defined in Cargo.toml. It must not contain any dashes.
+        required: true
+        type: string
+
+jobs:
+  lin_x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rustup target add x86_64-unknown-linux-gnu
+      - run: |
+          mkdir -p ${{ inputs.output-path }}/lin_x64
+          cargo build --target x86_64-unknown-linux-gnu --release
+          cp target/x86_64-unknown-linux-gnu/release/lib${{ inputs.output-path }}.so ${{ inputs.output-path }}/lin_x64/${{ inputs.output-path }}.xpl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lin_x64
+          path: ${{ inputs.output-path }}
+
+  mac_x64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+      - run: |
+          mkdir -p ${{ inputs.output-path }}/mac_x64
+          cargo build --target aarch64-apple-darwin --release
+          cargo build --target x86_64-apple-darwin --release
+          lipo -create -output ${{ inputs.output-path }}/mac_x64/${{ inputs.output-path }}.xpl target/aarch64-apple-darwin/release/lib${{ inputs.output-path }}.dylib target/x86_64-apple-darwin/release/lib${{ inputs.output-path }}.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac_x64
+          path: ${{ inputs.output-path }}
+
+  win_x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rustup target add x86_64-pc-windows-msvc
+      - run: |
+          mkdir -p ${{ inputs.output-path }}/win_x64
+          cargo build --target x86_64-pc-windows-msvc --release
+          cp target/x86_64-pc-windows-msvc/release/${{ inputs.output-path }}.dll ${{ inputs.output-path }}/win_x64/${{ inputs.output-path }}.xpl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win_x64
+          path: ${{ inputs.output-path }}
