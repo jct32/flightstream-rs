@@ -7,6 +7,7 @@ license = "MIT"
 [dependencies]
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 serde_json = "1.0.140"
+thiserror = "2.0.12"
 xplane-sdk-sys = { git = "https://github.com/jct32/xplane-sdk", version = "0.4.0" }
 xplm = "0.4.2"
 

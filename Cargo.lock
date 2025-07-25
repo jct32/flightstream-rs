@@ -149,6 +149,7 @@ version = "0.1.0"
 dependencies = [
  "reqwest",
  "serde_json",
+ "thiserror 2.0.12",
  "xplane-sdk-sys",
  "xplm",
 ]

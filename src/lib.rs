@@ -2,26 +2,47 @@ extern crate xplm;
 mod panic;
 mod xplmhelpers;
 
-use reqwest;
 use serde_json::Value;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use thiserror::Error;
 use xplm::flight_loop::{FlightLoop, FlightLoopCallback, LoopState};
 use xplm::menu::{ActionItem, Menu, MenuClickHandler};
 use xplm::plugin::{Plugin, PluginInfo};
 use xplm::{debugln, xplane_plugin};
 
 use crate::panic::set_custom_panic;
-use crate::xplmhelpers::{
-    xplm_get_directory_separator, xplm_get_system_path, xplm_load_fms_flight_plan,
-};
+use crate::xplmhelpers::{xplm_get_system_path, xplm_load_fms_flight_plan};
 
-static HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-static DATA: Mutex<Option<String>> = Mutex::new(None);
-static PATH: Mutex<Option<String>> = Mutex::new(None);
+static HANDLE: Mutex<Option<JoinHandle<Result<String>>>> = Mutex::new(None);
 static USERNAME: Mutex<Option<String>> = Mutex::new(None);
+
+#[derive(Debug, Error)]
+enum Error {
+    #[error("No Simbrief username set")]
+    NoSimBriefUsername,
+    #[error("Simbrief JSON download failed: {0}")]
+    SimbriefJsonDownloadFailed(reqwest::Error),
+    #[error("Simbrief JSON is not a string: {0}")]
+    SimbriefJsonNotAString(reqwest::Error),
+    #[error("Simbrief JSON parsing failed: {0}")]
+    SimbriefJsonParsingFailed(serde_json::Error),
+    #[error("Simbrief API request failed with status: {0}")]
+    SimbriefAPIRequestFailed(String),
+    #[error("Simbrief response is malformed: {0}")]
+    SimbriefJsonMalformed(&'static str),
+    #[error("Simbrief flight plan download failed: {0}")]
+    SimbriefFplnDownloadFailed(reqwest::Error),
+    #[error("Simbrief flight plan is not a string: {0}")]
+    SimbreifFplnIsNotAString(reqwest::Error),
+    #[error("Cannot read config file: {0}")]
+    CannotReadConfigFile(PathBuf, std::io::Error),
+}
+
+type Result<T> = core::result::Result<T, Error>;
 
 struct FlightStreamPlugin {
     _plugins_submenu: Menu,
@@ -40,17 +61,9 @@ impl Plugin for FlightStreamPlugin {
         plugin_submenu.add_child(ActionItem::new("Set username", SetUserNameHandler).unwrap());
         plugin_submenu.add_to_plugins_menu();
 
-        set_path(get_plugin_path());
-
-        match get_path() {
-            Some(_p) => (),
-            None => debugln!("flightsteam-rs: Bad X-Plane directory path"),
-        }
-
-        set_username(get_username_from_file());
-        match get_username() {
-            Some(_u) => (),
-            None => debugln!("flightstream_rs: Unable to get username from file"),
+        match get_username_from_file() {
+            Ok(username) => set_username(username),
+            Err(e) => debugln!("flightstream_rs: Unable to get username from file: {e}"),
         }
 
         let mut flight_loop = FlightLoop::new(LoopHandler);
@@ -79,13 +92,14 @@ xplane_plugin!(FlightStreamPlugin);
 struct LoopHandler;
 impl FlightLoopCallback for LoopHandler {
     fn flight_loop(&mut self, _state: &mut LoopState) {
-        let mut lock_guard = HANDLE.lock().expect("Lock is panicked");
-        if let Some(ref handle) = *lock_guard {
-            if handle.is_finished() {
-                *lock_guard = None;
-                unsafe {
-                    call_load();
-                }
+        if let Some(handle) = HANDLE
+            .lock()
+            .expect("Lock is panicked")
+            .take_if(|h| h.is_finished())
+        {
+            match handle.join().expect("Fatal error joining worker thread") {
+                Ok(data) => xplm_load_fms_flight_plan(&data),
+                Err(e) => debugln!("flightstream_rs: Error requesting data from simbrief: {e}"),
             }
         }
     }
@@ -102,9 +116,7 @@ impl MenuClickHandler for DownloadAndLoadHandler {
                 "flightstream_rs: Error, cannot spawn another download thread, already working"
             );
         } else {
-            *guard = Some(std::thread::spawn(|| {
-                request_from_simbrief();
-            }));
+            *guard = Some(std::thread::spawn(request_from_simbrief));
         }
     }
 }
@@ -112,116 +124,68 @@ impl MenuClickHandler for DownloadAndLoadHandler {
 struct SetUserNameHandler;
 impl MenuClickHandler for SetUserNameHandler {
     fn item_clicked(&mut self, _item: &ActionItem) {
-        set_username(get_username_from_file());
-        match get_username() {
-            Some(_u) => (),
-            None => debugln!("flightstream_rs: No username"),
+        match get_username_from_file() {
+            Ok(username) => set_username(username),
+            Err(e) => {
+                debugln!("flightstream_rs: Error retrieving username from configuration: {e}");
+            }
         }
     }
 }
 
-unsafe fn call_load() {
-    let data_lock = DATA.lock().unwrap();
-    if let Some(ref data) = *data_lock {
-        xplm_load_fms_flight_plan(data);
-    }
-}
-
-fn request_from_simbrief() {
-    let mut data = DATA.lock().unwrap();
-    *data = Some("".to_string());
-    std::mem::drop(data);
-    match get_username() {
-        Some(u) => {
-            let mut url = "https://www.simbrief.com/api/xml.fetcher.php?username=".to_string();
-            url.push_str(u.as_str());
-            url.push_str("&json=1");
-            if let Ok(body) = reqwest::blocking::get(url)
-                .expect("flightstream_rs: Unable to get request")
-                .text()
-            {
-                let value: &str = body.as_str();
-                let v: Value = serde_json::from_str(value).unwrap();
-                if v["fetch"]["status"] == "Success" {
-                    get_flight_plan(v);
-                } else {
-                    debugln!("flightstream_rs: Bad request: {}", v["fetch"]["status"]);
-                }
-            };
-        }
-        None => debugln!("flightstream_rs: No username"),
-    }
-}
-
-fn get_flight_plan(v: Value) {
-    let fp_link = v["fms_downloads"]["xpe"]["link"]
-        .to_string()
-        .replace("\"", "");
-    let mut download_link = "https://www.simbrief.com/ofp/flightplans/".to_string();
-    download_link.push_str(&fp_link);
-    if let Ok(body) = reqwest::blocking::get(download_link)
-        .expect("flighstream-rs: Bad FP request link")
+fn request_from_simbrief() -> Result<String> {
+    let username: String = get_username().ok_or(Error::NoSimBriefUsername)?;
+    let url = format!("https://www.simbrief.com/api/xml.fetcher.php?username={username}&json=1");
+    let body = reqwest::blocking::get(url)
+        .map_err(Error::SimbriefJsonDownloadFailed)?
         .text()
-    {
-        let mut data = DATA.lock().unwrap();
-        *data = Some(body);
+        .map_err(Error::SimbriefJsonNotAString)?;
+    let v: Value = serde_json::from_str(&body).map_err(Error::SimbriefJsonParsingFailed)?;
+    let status = v["fetch"]["status"]
+        .as_str()
+        .ok_or(Error::SimbriefJsonMalformed(
+            "fetch/status key is not a string,",
+        ))?;
+    match status {
+        "Success" => get_flight_plan(v),
+        _ => Err(Error::SimbriefAPIRequestFailed(status.into())),
     }
 }
 
-fn get_plugin_path() -> String {
+fn get_flight_plan(v: Value) -> Result<String> {
+    let fp_link = v["fms_downloads"]["xpe"]["link"]
+        .as_str()
+        .ok_or(Error::SimbriefJsonMalformed(
+            "fms_downloads/xpe/link key is not a string",
+        ))?
+        .replace("\"", "");
+    let download_link = format!("https://www.simbrief.com/ofp/flightplans/{fp_link}");
+    reqwest::blocking::get(download_link)
+        .map_err(Error::SimbriefFplnDownloadFailed)?
+        .text()
+        .map_err(Error::SimbreifFplnIsNotAString)
+}
+
+fn get_plugin_path() -> PathBuf {
     let mut path = xplm_get_system_path();
-    let div_char = xplm_get_directory_separator();
-    path = path
-        + &div_char
-        + "Resources"
-        + &div_char
-        + "plugins"
-        + &div_char
-        + "flightstream_rs"
-        + &div_char.to_string();
+    path.push("Resources");
+    path.push("plugins");
+    path.push("flightstream_rs");
     path
 }
 
-fn set_path(path: String) {
-    let mut path_lock = PATH.lock().unwrap();
-    *path_lock = Some(path);
-}
-
-fn get_path() -> Option<String> {
-    let path_lock = PATH.lock().unwrap();
-    path_lock.clone()
-}
-
 fn set_username(username: String) {
-    let mut username_lock = USERNAME.lock().unwrap();
-    *username_lock = Some(username);
+    *USERNAME.lock().unwrap() = Some(username);
 }
 
 fn get_username() -> Option<String> {
-    let username_lock = USERNAME.lock().unwrap();
-    username_lock.clone()
+    USERNAME.lock().unwrap().clone()
 }
 
-fn get_username_from_file() -> String {
-    let file_path = get_path();
-    let mut username = String::new();
-    let mut _path = String::new();
-    match file_path {
-        Some(p) => {
-            _path = p;
-            _path.push_str("username.txt");
-            let path = _path.clone();
-            let contents = fs::read_to_string(_path);
-            match contents {
-                Ok(contents) => {
-                    username = contents.trim().to_string();
-                }
-                Err(_) => {
-                    debugln!("flightstream_rs: Unable to open file at {path}");
-                }
-            }
-        }
-        None => debugln!("flightstream_rs: File path not found"),
-    }
-    username
+fn get_username_from_file() -> Result<String> {
+    let mut file_path = get_plugin_path();
+    file_path.push("username.txt");
+    let contents =
+        fs::read_to_string(&file_path).map_err(|e| Error::CannotReadConfigFile(file_path, e))?;
+    Ok(contents.trim().to_string())
 }
